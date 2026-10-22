@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>سازنده اینترو کمیته‌ها | انجمن سازندگان ذی‌صلاح ارومیه</title>
+<style>
+@font-face{font-family:'BNazanin';src:url('assets/B-NAZANIN.TTF')}
+:root{--g1:#ffe49a;--g2:#c4902a;--bg:#0b0a08;--card:#161410;--tx:#f4ead2}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(900px 500px at 50% -10%,#2b2110,var(--bg));color:var(--tx);font-family:'BNazanin',Tahoma,sans-serif;font-size:19px}
+.wrap{max-width:1100px;margin:auto;padding:20px;display:grid;grid-template-columns:1fr 360px;gap:20px}
+@media(max-width:900px){.wrap{grid-template-columns:1fr}}
+h1{grid-column:1/-1;text-align:center;margin:8px 0;font-size:34px;background:linear-gradient(var(--g1),var(--g2));-webkit-background-clip:text;color:transparent}
+.card{background:var(--card);border:1px solid #4a3a1a;border-radius:16px;padding:16px}
+label{display:block;margin:10px 0 4px;color:var(--g1)}
+input[type=text],textarea{width:100%;background:#0d0c0a;color:var(--tx);border:1px solid #5a4620;border-radius:10px;padding:8px;font:inherit}
+textarea{height:170px;line-height:1.7}
+button{font:inherit;font-weight:bold;background:linear-gradient(var(--g1),var(--g2));color:#201808;border:0;border-radius:10px;padding:10px 16px;cursor:pointer;margin:4px 0}
+button.s{background:#2a2216;color:var(--g1);border:1px solid #5a4620}
+.pick{position:relative;border:1px dashed #5a4620;border-radius:10px;overflow:auto;max-height:430px;margin-top:8px;text-align:center}
+.pick canvas{max-width:100%;cursor:crosshair}
+small{color:#b9a779;display:block;margin-top:6px;line-height:1.7}
+#stage{width:100%;max-width:360px;aspect-ratio:9/16;background:#000;border-radius:12px;border:1px solid #6b5522;display:block;margin:auto}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>سازنده اینترو کمیته‌های تخصصی</h1>
+
+<div class="card">
+  <label>۱) عکس بنر کمیته (هر بنری، با هر تعداد عضو)</label>
+  <input type="file" id="file" accept="image/*">
+  <label>۲) عنوان کمیته</label>
+  <input type="text" id="title" placeholder="خودکار از روی بنر خوانده می‌شود">
+  <label>۳) اعضا (هر خط یک نفر: نام | مدرک | توضیح اختیاری)</label>
+  <textarea id="mem" placeholder="بعد از انتخاب بنر، اسم‌ها خودکار اینجا پر می‌شوند و می‌توانی اصلاحشان کنی"></textarea>
+  <label>۴) عکس‌ها خودکار پیدا می‌شوند. اگه اشتباه بود، دستی کلیک کن: اول لوگو، بعد اعضا به ترتیب</label>
+  <div class="pick"><canvas id="pick" width="10" height="10"></canvas></div>
+  <label>شعاع عکس‌ها (پیکسلِ بنر): <span id="rv">77</span></label>
+  <input type="range" id="rad" min="30" max="200" value="77" style="width:100%">
+  <button class="s" id="undo">برگشت آخرین نقطه</button>
+  <button class="s" id="clear">پاک کردن نقاط</button>
+  <small id="info">هنوز بنری انتخاب نشده.</small>
+</div>
+
+<div class="card" style="text-align:center">
+  <canvas id="stage" width="1080" height="1920"></canvas>
+  <label style="display:inline"><input type="checkbox" id="snd" checked> صدا</label><br>
+  <button id="play">▶ پیش‌نمایش</button>
+  <button id="rec">⬇ ساخت و دانلود ویدیو</button>
+  <small>ویدیو هم‌زمان با پخش ضبط می‌شود، پس تا پایان صبر کن و تب را عوض نکن. در کروم خروجی MP4 است، در بقیه WebM.</small>
+</div>
+</div>
+
+<script src="detect.js"></script>
+<script>
+const W=1080,H=1920,$=id=>document.getElementById(id);
+const cv=$('stage'),ctx=cv.getContext('2d');
+const pk=$('pick'),pc=pk.getContext('2d');
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const sst=x=>{x=clamp(x);return x*x*(3-2*x)};
+const eo3=x=>1-Math.pow(1-clamp(x),3);
+const eio3=x=>{x=clamp(x);return x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2};
+const eob=x=>{x=clamp(x);const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(x-1,3)+c1*Math.pow(x-1,2)};
+const rnd=(i)=>{const s=Math.sin(i*127.1+311.7)*43758.5453;return s-Math.floor(s)};
+
+let banner=null,pts=[],avs=[],M=[],logo=new Image();
+logo.src='assets/logo.png';
+
+/* ---------- انتخاب نقاط روی بنر ---------- */
+function parse(){const L=$('mem').value.split('\n');return L.map(s=>s.trim()).map(l=>{const p=l.split('|').map(x=>x.trim());return{n:p[0]||'',c:p[1]||'',r:p[2]||''}})}
+function parseOld(){return $('mem').value.split('\n').map(s=>s.trim()).filter(Boolean).map(l=>{const p=l.split('|').map(x=>x.trim());return{n:p[0],c:p[1]||'',r:p[2]||''}})}
+function drawPick(){
+  if(!banner)return;
+  pk.width=banner.width;pk.height=banner.height;pc.drawImage(banner,0,0);
+  const r=+$('rad').value;
+  pts.forEach((p,i)=>{
+    pc.lineWidth=Math.max(3,banner.width/200);pc.strokeStyle=i?'#00e0ff':'#ff3a6a';
+    pc.beginPath();pc.arc(p.x,p.y,i?r:r*1.8,0,7);pc.stroke();
+    pc.fillStyle=pc.strokeStyle;pc.font=Math.round(r*.7)+'px sans-serif';pc.textAlign='center';pc.fillText(i?i:'لوگو',p.x,p.y+r*.25);
+  });
+  const n=pts.length?Math.max(0,pts.length-1):0;
+  if(!pts.length)return;$('info').textContent=pts.length===0?'اول مرکز لوگوی بنر را کلیک کن.':(pts.length<=n?`عکس عضو شماره ${pts.length} را کلیک کن (از ${n} نفر).`:'همه نقاط ثبت شد ✔ پیش‌نمایش را بزن.');
+}
+const say=m=>$('info').textContent=m;
+$('file').onchange=e=>{const f=e.target.files[0];if(!f)return;const im=new Image();im.onload=()=>{banner=im;pts=[];drawPick();autoRead()};im.src=URL.createObjectURL(f)};
+async function autoRead(){
+  const c=document.createElement('canvas');c.width=banner.width;c.height=banner.height;const x=c.getContext('2d');x.drawImage(banner,0,0);
+  const r=detectBanner(x.getImageData(0,0,c.width,c.height));
+  if(!r.logo||!r.members.length){say('تشخیص خودکار نشد؛ دستی کلیک کن (اول لوگو، بعد اعضا).');return}
+  pts=[r.logo,...r.members];const rs=r.members.map(m=>m.r).sort((a,b)=>a-b);$('rad').value=Math.round(rs[rs.length>>1]);$('rv').textContent=$('rad').value;drawPick();
+  say(`${r.members.length} عضو پیدا شد. در حال خواندن اسم‌ها (بار اول چند ثانیه صبر کن)...`);
+  try{await ocr(c,r)}catch(err){say(`${r.members.length} عضو پیدا شد ولی خواندن خودکار متن انجام نشد؛ اسم‌ها را دستی بنویس.`)}
+}
+function loadScript(u){return new Promise((ok,no)=>{const s=document.createElement('script');s.src=u;s.onload=ok;s.onerror=no;document.head.appendChild(s)})}
+const fixFa=s=>s.replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/[|_\[\]{}]/g,'').trim();
+function cropBin(src,x,y,w,h,th){const k=2.5,c=document.createElement('canvas');c.width=w*k;c.height=h*k;const g=c.getContext('2d');g.drawImage(src,x,y,w,h,0,0,c.width,c.height);
+  const d=g.getImageData(0,0,c.width,c.height),p=d.data;for(let i=0;i<p.length;i+=4){const v=(p[i]*.3+p[i+1]*.59+p[i+2]*.11)<th?0:255;p[i]=p[i+1]=p[i+2]=v}g.putImageData(d,0,0);return c}
+async function ocr(c,r){
+  if(!window.Tesseract)await loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js');
+  const wk=await Tesseract.createWorker('fas'),W=c.width,rd=async(cv,psm)=>{await wk.setParameters({tessedit_pageseg_mode:psm});return fixFa((await wk.recognize(cv)).data.text)};
+  const y1=r.members[0].y;
+  $('title').value=(await rd(cropBin(c,.07*W,y1-.186*W,.55*W,.06*W,115),'7')).replace(/\n/g,' ');
+  const rows=[];
+  for(let i=0;i<r.members.length;i++){
+    const cy=r.members[i].y,n=(await rd(cropBin(c,.551*W,cy-.02*W,.227*W,.092*W,150),'6')).split('\n').map(z=>z.trim()).filter(Boolean),
+      cr=(await rd(cropBin(c,.308*W,cy-.02*W,.225*W,.092*W,150),'6')).split('\n').map(z=>z.trim()).filter(Boolean),
+      role=(n[1]||cr[1]||'').replace(/[()（）]/g,'').trim();
+    rows.push([n[0]||'',cr[0]||'',role].join(' | '));$('mem').value=rows.join('\n');say(`خواندن اسم‌ها: ${i+1} از ${r.members.length}`);
+  }
+  await wk.terminate();say(`${r.members.length} عضو پیدا شد. اسم‌ها و مدارک را بررسی و در صورت نیاز اصلاح کن، بعد پیش‌نمایش بزن.`);
+}
+pk.onclick=e=>{if(!banner)return;const b=pk.getBoundingClientRect();pts.push({x:(e.clientX-b.left)*pk.width/b.width,y:(e.clientY-b.top)*pk.height/b.height});drawPick()};
+$('undo').onclick=()=>{pts.pop();drawPick()};$('clear').onclick=()=>{pts=[];drawPick()};
+$('rad').oninput=()=>{$('rv').textContent=$('rad').value;drawPick()};$('mem').oninput=drawPick;
+
+/* ---------- آماده‌سازی ---------- */
+function prepare(){
+  if(!banner||pts.length<2){alert('اول بنر را انتخاب کن (یا لوگو و عکس اعضا را دستی علامت بزن).');return false}
+  const P=parse();M=pts.slice(1).map((_,i)=>P[i]||{n:'',c:'',r:''});
+  const r=+$('rad').value*0.93;
+  avs=M.map((m,i)=>{const p=pts[i+1],c=document.createElement('canvas');c.width=c.height=400;const x=c.getContext('2d');
+    x.beginPath();x.arc(200,200,200,0,7);x.clip();x.drawImage(banner,p.x-r,p.y-r,2*r,2*r,0,0,400,400);return c});
+  // چینش بنر
+  S.tall=banner.height/banner.width>1.9;S.s=S.tall?960/banner.width:Math.min(960/banner.width,1330/banner.height);const sh=banner.height*S.s;S.VW=banner.width*S.s;S.VX=(W-S.VW)/2;
+  S.VH=S.tall?1330:sh;S.VY=S.tall?250:915-sh/2;S.max=Math.max(0,sh-S.VH);S.rad=+$('rad').value;
+  const N=M.length;S.N=N;S.TP4=6.9+N+.2;S.TB=S.TP4+.6;
+  S.SC0=S.TB+2.8;S.SCD=S.tall?Math.max(4,N*.95):0;
+  S.END=S.SC0+S.SCD+2.2+(S.tall?0:1);
+  return true;
+}
+const S={};
+const FIN=[540,350,250];
+
+/* ---------- ابزار ترسیم ---------- */
+function gold(y,h){const g=ctx.createLinearGradient(0,y-h/2,0,y+h/2);g.addColorStop(0,'#fff0b8');g.addColorStop(1,'#d09a30');return g}
+function white(y,h){const g=ctx.createLinearGradient(0,y-h/2,0,y+h/2);g.addColorStop(0,'#ffffff');g.addColorStop(1,'#e0d2b0');return g}
+function txt(s,t,t0,t1,y,size,maxw,kind,dur=.9,fo=.3){
+  if(!s||t<t0||t>t1)return;
+  const p=eo3((t-t0)/dur),al=t1<1e8?1-sst((t-(t1-fo))/fo):1;
+  let sz=size;ctx.font=`bold ${sz}px BNazanin`;ctx.direction='rtl';
+  while(ctx.measureText(s).width>maxw&&sz>24){sz-=4;ctx.font=`bold ${sz}px BNazanin`}
+  const w=ctx.measureText(s).width+40;
+  ctx.save();ctx.globalAlpha=al;ctx.beginPath();ctx.rect(540+w/2-w*p-10,y-sz,w*p+20,sz*2);ctx.clip();
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  ctx.shadowColor=kind=='g'?'rgba(255,190,80,.8)':'rgba(255,215,150,.6)';ctx.shadowBlur=22;
+  ctx.fillStyle=kind=='g'?gold(y,sz):white(y,sz);ctx.strokeStyle=ctx.fillStyle;ctx.lineWidth=sz*.028;
+  ctx.strokeText(s,540,y);ctx.fillText(s,540,y);ctx.restore();
+}
+function line(t,t0,t1,y,w){if(t<t0||t>t1)return;const p=eo3((t-t0)/.8),al=1-sst((t-t1+.3)/.3);
+  ctx.save();ctx.globalAlpha=al;const g=ctx.createLinearGradient(540-w*p,0,540+w*p,0);g.addColorStop(0,'rgba(255,200,100,0)');g.addColorStop(.5,'#ffd98a');g.addColorStop(1,'rgba(255,200,100,0)');
+  ctx.fillStyle=g;ctx.fillRect(540-w*p,y,2*w*p,3);ctx.restore()}
+function glow(x,y,r,a,c='255,190,100'){const g=ctx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,`rgba(${c},${a})`);g.addColorStop(1,`rgba(${c},0)`);ctx.fillStyle=g;ctx.fillRect(x-r,y-r,2*r,2*r)}
+function coin(x,y,D,th,al=1){
+  const c=Math.cos(th),w=Math.max(Math.abs(c)*D,D*.03);ctx.save();ctx.globalAlpha=al;
+  ctx.translate(x,y);
+  if(Math.abs(c)<.07){ctx.fillStyle='#c99a3a';ctx.fillRect(-D*.02,-D/2,D*.04,D)}
+  else{ctx.scale(c<0?-1:1,1);ctx.drawImage(logo,-w/2,-D/2,w,D)}
+  ctx.restore();
+}
+function avatar(i,x,y,D,ring=1,al=1){
+  ctx.save();ctx.globalAlpha=al;ctx.drawImage(avs[i],x-D/2,y-D/2,D,D);
+  if(ring>0){ctx.lineWidth=5;const g=ctx.createLinearGradient(0,y-D/2,0,y+D/2);g.addColorStop(0,'#ffe28c');g.addColorStop(1,'#c48c2a');ctx.strokeStyle=g;
+    const off=Math.min(9,D*.07);ctx.beginPath();ctx.arc(x,y,D/2+off,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(ring,1)-.001);ctx.stroke()}
+  ctx.restore();
+}
+function rowSlot(i){const n=S.N,sp=n>1?Math.min(190,900/(n-1)):0;return[540+((n-1)/2-i)*sp,1470,Math.min(112,sp*.78||112)]}
+function bslot(i,scroll=0){const p=pts[i+1];return[S.VX+p.x*S.s,S.VY+p.y*S.s-scroll]}
+function inView(i){const y=bslot(i)[1];return y>S.VY+40&&y<S.VY+S.VH-40}
+
+/* ---------- یک فریم ---------- */
+function render(t){
+  const N=S.N,T0=6.9,TF0=5,TF1=6.4,TP4=S.TP4,TB=S.TB;
+  ctx.fillStyle='#050403';ctx.fillRect(0,0,W,H);
+  glow(540,H*.45,1100,.17,'255,190,90');
+  // پرتوها
+  const env=sst((t-.2)/1)*(1-sst((t-4.6)/1.2));
+  if(env>.01){ctx.save();ctx.globalCompositeOperation='lighter';ctx.translate(540,900);
+    for(let k=0;k<26;k++){const a=k*Math.PI/13+t*.35,w=.03+.05*rnd(k),L=1300*(.5+.5*rnd(k+9));
+      const g=ctx.createLinearGradient(0,0,Math.cos(a)*L,Math.sin(a)*L);g.addColorStop(0,`rgba(255,200,110,${.30*env*(.4+.6*rnd(k+3))})`);g.addColorStop(1,'rgba(255,200,110,0)');
+      ctx.fillStyle=g;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(Math.cos(a-w)*L,Math.sin(a-w)*L);ctx.lineTo(Math.cos(a+w)*L,Math.sin(a+w)*L);ctx.fill()}
+    ctx.restore()}
+  // جرقه‌ها
+  ctx.save();ctx.fillStyle='#ffd98a';for(let k=0;k<70;k++){const x=rnd(k)*W,y=(rnd(k+50)*H-t*(10+20*rnd(k+9))+H*4)%H,a=(.15+.45*Math.abs(Math.sin(t*1.3+k)))*sst(t/1.5);ctx.globalAlpha=a;ctx.fillRect(x,y,2.5,2.5)}ctx.restore();
+  // قاب
+  const fp=eo3((t-5.3)/1.7);if(fp>0){ctx.save();ctx.globalAlpha=fp*.9;ctx.strokeStyle='#c9992f';ctx.lineWidth=3;ctx.strokeRect(22,22,W-44,H-44);ctx.lineWidth=1;ctx.strokeRect(36,36,W-72,H-72);ctx.restore()}
+  // سکه
+  let cs=null;
+  if(t>=.8&&t<TF0){const u=(t-.8)/3.4,th=Math.PI*6*eo3(u),sc=.45+.55*eo3((t-.8)/1.1),D=700*sc;
+    glow(540,900,420,.28*sst((t-.8)/.5));cs=[540,900+(1-eo3((t-.8)/1.1))*40,D,th,sst((t-.8)/.45)]}
+  else if(t>=TF0&&t<TP4){const u=eio3((t-TF0)/(TF1-TF0));cs=[540,900+(FIN[1]-900)*u-90*Math.sin(Math.PI*u),700+(FIN[2]-700)*u,0,1]}
+  else if(t>=TP4){const u=eio3((t-TP4)/1.3),lp=pts[0],lx=S.VX+lp.x*S.s,ly=S.VY+lp.y*S.s,ld=lp.r?lp.r:0,LD=2*pts[0].r*S.s;
+    cs=[FIN[0]+(lx-FIN[0])*u,FIN[1]+(ly-FIN[1])*u-70*Math.sin(Math.PI*u),FIN[2]+(LD-FIN[2])*u,0,1-sst((t-(TB+1.7))/.5)]}
+  if(cs&&t>=TF1&&t<TP4+.3)glow(cs[0],cs[1],260,.3);
+  if(cs&&t<TF0&&cs[4]>.01){const fy=cs[1]+cs[2]/2+30;ctx.save();ctx.translate(0,2*fy);ctx.scale(1,-1);coin(cs[0],cs[1],cs[2],cs[3],cs[4]*.22);ctx.restore();
+    const g=ctx.createLinearGradient(0,fy,0,fy+cs[2]*.5);g.addColorStop(0,'rgba(5,4,3,.2)');g.addColorStop(1,'rgba(5,4,3,1)');ctx.fillStyle=g;ctx.fillRect(0,fy,W,cs[2]*.5+4)}
+  if(cs&&cs[4]>.01)coin(cs[0],cs[1],cs[2],cs[3],cs[4]);
+  // متن‌های اولیه
+  txt('انجمن صنفی کارفرمایی سازندگان',t,3.2,5.0,1450,54,760,'w');
+  txt('ذی‌صلاح ساختمان شهرستان ارومیه',t,3.5,5.0,1510,54,760,'w');
+  line(t,3.9,5.0,1395,230);
+  txt('اعضای کمیته تخصصی',t,5.9,TP4,545,84,900,'w',.9,.5);
+  txt(($('title').value||'کمیته تخصصی'),t,6.2,TP4,640,140,920,'g',1.2,.5);
+  line(t,7.1,TP4,812,330);
+  // جایگاه‌های ردیف
+  if(t>6.6)for(let i=0;i<N;i++){const[x,y,D]=rowSlot(i),a=sst((t-6.6-.08*i)/.5)*(1-sst((t-TP4)/.3));
+    if(a>.01){ctx.save();ctx.globalAlpha=a*.35;ctx.strokeStyle='#ebbe5f';ctx.lineWidth=3;ctx.beginPath();ctx.arc(x,y,D/2+9,0,7);ctx.stroke();ctx.restore()}}
+  // بنر (موزاییکی)
+  if(t>=TB){drawBanner(t)}
+  // اعضا
+  for(let i=0;i<N;i++){
+    const ti=T0+i,a=t-ti;if(a<0)continue;const[rx,ry,rD]=rowSlot(i);let x,y,D,al=1,rp=1;
+    if(a<.8){D=270*(.55+.45*eob(a/.45));x=540;y=980;al=sst(a/.25);rp=eo3(a/.55);if(a>.05)glow(540,980,D*.95,.3*al)}
+    else if(a<1.12){const u=eio3((a-.8)/.32);x=540+(rx-540)*u;y=980+(ry-980)*u;D=270+(rD-270)*u}
+    else{x=rx;y=ry;D=rD}
+    if(t>=TP4){
+      if(inView(i)){const u=eio3((t-TP4-.06*i)/1),[sx,sy]=bslot(i),sD=2*S.rad*.93*S.s;
+        x=rx+(sx-rx)*u;y=ry+(sy-ry)*u;D=rD+(sD-rD)*u;al=1-sst((t-(TB+1.7))/.5)}
+      else al=1-sst((t-TP4-.06*i)/.5)}
+    if(al>.01)avatar(i,x,y,D,rp,al);
+    const tt=ti;
+    txt(M[i].n,t,tt+.2,tt+.95,1200,112,900,'g',.7,.22);
+    txt(M[i].c,t,tt+.4,tt+.95,1272,70,900,'w',.6,.22);
+    if(M[i].r)txt('('+M[i].r+')',t,tt+.5,tt+.95,1336,60,900,'g',.5,.22);
+  }
+  // فلش لوگو
+  const f=Math.exp(-Math.pow((t-6.45)/.25,2));if(f>.02)glow(FIN[0],FIN[1],380,.8*f,'255,215,150');
+  const o=1-sst((t-(S.END-.5))/.5);ctx.fillStyle=`rgba(0,0,0,${1-o})`;ctx.fillRect(0,0,W,H);
+}
+function drawBanner(t){
+  const TB=S.TB,sc=S.tall?S.max*eio3((t-S.SC0)/S.SCD):0,s=S.s,rec=cv.__rec;
+  ctx.save();
+  const rr=(x,y,w,h,r)=>{ctx.beginPath();ctx.roundRect?ctx.roundRect(x,y,w,h,r):ctx.rect(x,y,w,h)};
+  if(t<TB+1.9){ // افکت موزاییک
+    const ts=60;
+    for(let ty=0;ty<S.VH;ty+=ts)for(let tx=0;tx<S.VW;tx+=ts){
+      const d=(tx/S.VW*.45+ty/S.VH*.5)+rnd(tx*.13+ty*.7)*.3,u=eob((t-TB-d)/.45);if(u<=0)continue;
+      const k=clamp(u,0,1.15),w=ts*k,x=S.VX+tx+(ts-w)/2,y=S.VY+ty+(ts-w)/2;
+      ctx.globalAlpha=clamp(u*2);
+      ctx.drawImage(banner,tx/s,ty/s,Math.min(ts,S.VW-tx)/s,Math.min(ts,S.VH-ty)/s,x,y,Math.min(w,w*(S.VW-tx)/ts),Math.min(w,w*(S.VH-ty)/ts));
+      const fl=Math.exp(-Math.pow((t-TB-d-.2)/.12,2))*.5;if(fl>.02){ctx.globalAlpha=fl;ctx.fillStyle='#ffe6a8';ctx.fillRect(x,y,w,w)}
+    }
+  }else{
+    rr(S.VX,S.VY,S.VW,S.VH,26);ctx.clip();ctx.imageSmoothingQuality='high';
+    ctx.drawImage(banner,0,sc/s,banner.width,S.VH/s,S.VX,S.VY,S.VW,S.VH);
+  }
+  ctx.restore();
+  ctx.save();ctx.globalAlpha=sst((t-TB)/.5);const g=ctx.createLinearGradient(0,S.VY,0,S.VY+S.VH);g.addColorStop(0,'#ffe496');g.addColorStop(1,'#c48c2a');
+  ctx.strokeStyle=g;ctx.lineWidth=5;rr(S.VX-3,S.VY-3,S.VW+6,S.VH+6,29);ctx.stroke();ctx.restore();
+  // برق اسکرول
+  if(t>S.END-4&&false){}
+}
+
+/* ---------- صدا ---------- */
+let ac=null,dest=null,master=null;
+function audioInit(forRec){
+  ac=new (window.AudioContext||window.webkitAudioContext)();master=ac.createGain();master.gain.value=.9;
+  const len=ac.sampleRate*2.2,ir=ac.createBuffer(2,len,ac.sampleRate);
+  for(let c=0;c<2;c++){const d=ir.getChannelData(c);for(let i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2.6)}
+  const cvb=ac.createConvolver();cvb.buffer=ir;const wet=ac.createGain();wet.gain.value=.35;
+  master.connect(cvb);cvb.connect(wet);
+  dest=ac.createMediaStreamDestination();
+  [master,wet].forEach(n=>{n.connect(dest);if(!forRec)n.connect(ac.destination)});
+}
+function tone(f,t,d,g,type='sine',h=0){
+  const o=ac.createOscillator(),v=ac.createGain();o.type=type;o.frequency.value=f;
+  v.gain.setValueAtTime(0,t);v.gain.linearRampToValueAtTime(g,t+.01);v.gain.exponentialRampToValueAtTime(.0001,t+d);
+  o.connect(v);v.connect(master);o.start(t);o.stop(t+d+.05);
+  if(h){tone(f*2,t,d*.6,g*h,type)}
+}
+function noiseBurst(t,d,f0,f1,g){
+  const b=ac.createBuffer(1,ac.sampleRate*d,ac.sampleRate),x=b.getChannelData(0);for(let i=0;i<x.length;i++)x[i]=Math.random()*2-1;
+  const s=ac.createBufferSource();s.buffer=b;const fl=ac.createBiquadFilter();fl.type='bandpass';fl.Q.value=1.2;
+  fl.frequency.setValueAtTime(f0,t);fl.frequency.exponentialRampToValueAtTime(f1,t+d);
+  const v=ac.createGain();v.gain.setValueAtTime(0,t);v.gain.linearRampToValueAtTime(g,t+d*.5);v.gain.linearRampToValueAtTime(0,t+d);
+  s.connect(fl);fl.connect(v);v.connect(master);s.start(t);
+}
+function schedule(a0){
+  const at=x=>a0+x,N=S.N;
+  // پد ملایم  Dm - Bb - F - C
+  const ch=[[146.8,174.6,220],[116.5,146.8,174.6],[174.6,220,261.6],[130.8,164.8,196]];
+  for(let b=0;b*4<S.END+2;b++)ch[b%4].forEach(f=>{const o=ac.createOscillator(),v=ac.createGain(),lp=ac.createBiquadFilter();o.type='sawtooth';o.frequency.value=f;lp.type='lowpass';lp.frequency.value=700;
+    v.gain.setValueAtTime(0,at(b*4));v.gain.linearRampToValueAtTime(.035,at(b*4+1.5));v.gain.linearRampToValueAtTime(0,at(b*4+4.2));o.connect(lp);lp.connect(v);v.connect(master);o.start(at(b*4));o.stop(at(b*4+4.3))});
+  // پیانوی ساده
+  const sc=[293.7,349.2,440,523.3,587.3,698.5,880];
+  for(let t=1;t<S.END-1;t+=.5){tone(sc[Math.floor(rnd(t*7)*5)],at(t),1.6,.05,'triangle',.3)}
+  noiseBurst(at(.8),1.2,300,3000,.12);noiseBurst(at(4.9),1.5,500,4000,.16);
+  tone(58,at(6.4),1.6,.6);
+  for(let i=0;i<N;i++){const t=6.9+i;tone(sc[(i*2)%7]*2,at(t),1.4,.16,'sine',.4);tone(sc[(i*2)%7],at(t+.02),1.2,.07,'triangle');noiseBurst(at(t+.7),.4,800,3500,.08)}
+  noiseBurst(at(S.TP4),.7,400,4000,.18);
+  tone(52,at(S.TB),2,.7);noiseBurst(at(S.TB),1.6,3000,9000,.12);
+  for(let i=0;i<14;i++)tone(sc[i%7]*2,at(S.TB+.2+i*.12),1.2,.04,'sine');
+  [293.7,440,587.3,880].forEach((f,i)=>tone(f,at(S.END-2.6+i*.1),2.6,.1,'sine',.3));
+}
+
+/* ---------- پخش / ضبط ---------- */
+let raf=0,running=false;
+async function run(record){
+  if(!prepare())return;
+  cancelAnimationFrame(raf);if(ac)ac.close();
+  await document.fonts.load('40px BNazanin');await new Promise(r=>logo.complete?r():logo.onload=r);
+  const useSnd=$('snd').checked||record;let rec=null,chunks=[];
+  if(useSnd){audioInit(record);schedule(ac.currentTime+.15)}
+  if(record){
+    const mt=['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m));
+    const ms=new MediaStream([...cv.captureStream(30).getVideoTracks(),...(dest?dest.stream.getAudioTracks():[])]);
+    rec=new MediaRecorder(ms,{mimeType:mt,videoBitsPerSecond:12e6});rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+    rec.onstop=()=>{const ext=mt.includes('mp4')?'mp4':'webm',a=document.createElement('a');a.href=URL.createObjectURL(new Blob(chunks,{type:mt}));a.download='Intro_'+$('title').value.replace(/\s+/g,'_')+'.'+ext;a.click();$('rec').disabled=false};
+    $('rec').disabled=true;rec.start();
+  }
+  const st=performance.now()+150;
+  const loop=()=>{const t=(performance.now()-st)/1000;render(Math.max(t,0));if(t<S.END)raf=requestAnimationFrame(loop);else{if(rec)rec.stop()}};
+  loop();
+}
+$('play').onclick=()=>run(false);$('rec').onclick=()=>run(true);
+</script>
+</body>
+</html>
